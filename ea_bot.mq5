@@ -3,9 +3,9 @@
 //+------------------------------------------------------------------+
 #property strict
 
-input int maFastPeriod = 53;
+input int maFastPeriod = 35;
 input int maSlowPeriod = 82;
-input int maConfirmPeriod = 35;
+input int maConfirmPeriod = 53;
 input ENUM_MA_METHOD maMethod = MODE_SMA;
 input ENUM_APPLIED_PRICE appliedPrice = PRICE_CLOSE;
 input double adxThreshold = 25.0;
