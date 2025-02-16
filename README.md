@@ -42,4 +42,7 @@ Berikut adalah penjelasan fitur-fitur yang ada dalam EA ini:
 
 ---
 
-EA ini sudah memiliki sistem yang lebih optimal dalam mengikuti tren dan mengamankan profit. Jika ada tambahan fitur yang diinginkan, bisa disesuaikan lebih lanjut.
+EA ini sudah memiliki sistem yang lebih optimal dalam mengikuti tren dan mengamankan profit. 
+
+---
+### *"Author Didit Farafat**
