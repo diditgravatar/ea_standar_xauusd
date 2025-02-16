@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
-//| Expert Advisor untuk XAUUSD M15 - MA35 & MA82 dengan Optimalisasi |
+//| Expert Advisor untuk XAUUSD M15 - MA53 & MA82 dengan Konsolidasi |
 //+------------------------------------------------------------------+
 #property strict
 
-input int maFastPeriod = 35;
+input int maFastPeriod = 53;
 input int maSlowPeriod = 82;
+input int maConfirmPeriod = 35;
 input ENUM_MA_METHOD maMethod = MODE_SMA;
 input ENUM_APPLIED_PRICE appliedPrice = PRICE_CLOSE;
 input double adxThreshold = 25.0;
@@ -14,11 +15,16 @@ input int rsiPeriod = 14;
 input int adxPeriod = 14;
 input double riskPercent = 2.0;
 input double atrMultiplier = 2.0;
-input int consolidationBars = 3; // Jumlah candle konsolidasi
+input int consolidationBars = 3;
 input int timeFilterStart = 9;
 input int timeFilterEnd = 21;
 input bool useMultiTimeframe = true;
 input ENUM_TIMEFRAMES higherTimeframe = PERIOD_H1;
+input bool useTrailingStop = true;
+input double trailingStopPips = 50;
+input bool useNewsFilter = true;
+input bool usePartialClose = true;
+input double partialClosePercentage = 50.0;
 
 //+------------------------------------------------------------------+
 //| Fungsi untuk mendapatkan lot berdasarkan equity                 |
@@ -32,20 +38,20 @@ double CalculateLotSize()
 }
 
 //+------------------------------------------------------------------+
-//| Fungsi untuk cek breakout, pullback & konsolidasi               |
+//| Fungsi untuk cek breakout & konsolidasi                         |
 //+------------------------------------------------------------------+
-bool CheckBreakoutPullback(bool isBuy)
+bool CheckBreakoutAndConsolidation(bool isBuy)
 {
     double maFastPrev = iMA(Symbol(), PERIOD_M15, maFastPeriod, 0, maMethod, appliedPrice, 1);
     double maSlowPrev = iMA(Symbol(), PERIOD_M15, maSlowPeriod, 0, maMethod, appliedPrice, 1);
+    double maConfirmPrev = iMA(Symbol(), PERIOD_M15, maConfirmPeriod, 0, maMethod, appliedPrice, 1);
     double pricePrev = iClose(Symbol(), PERIOD_M15, 1);
     
-    bool breakout = (isBuy && pricePrev > maFastPrev && pricePrev > maSlowPrev) ||
-                    (!isBuy && pricePrev < maFastPrev && pricePrev < maSlowPrev);
+    bool breakout = (isBuy && pricePrev > maFastPrev && pricePrev > maSlowPrev && pricePrev > maConfirmPrev) ||
+                    (!isBuy && pricePrev < maFastPrev && pricePrev < maSlowPrev && pricePrev < maConfirmPrev);
     
     if (!breakout) return false;
     
-    // Cek pullback atau konsolidasi
     double highMax = -1, lowMin = 999999;
     for (int i = 1; i <= consolidationBars; i++) {
         double high = iHigh(Symbol(), PERIOD_M15, i);
@@ -57,22 +63,7 @@ bool CheckBreakoutPullback(bool isBuy)
     double range = highMax - lowMin;
     double atr = iATR(Symbol(), PERIOD_M15, 14, 0);
     
-    return range < (atr * 0.5); // Konsolidasi jika range kecil
-}
-
-//+------------------------------------------------------------------+
-//| Fungsi untuk validasi ADX dan RSI                               |
-//+------------------------------------------------------------------+
-bool CheckIndicators(bool isBuy)
-{
-    double adx = iADX(Symbol(), PERIOD_M15, adxPeriod, PRICE_CLOSE, MODE_MAIN, 0);
-    double rsi = iRSI(Symbol(), PERIOD_M15, rsiPeriod, PRICE_CLOSE, 0);
-    
-    if (adx < adxThreshold) return false;
-    if (isBuy && rsi > rsiOverbought) return false;
-    if (!isBuy && rsi < rsiOversold) return false;
-    
-    return true;
+    return range < (atr * 0.5);
 }
 
 //+------------------------------------------------------------------+
@@ -80,12 +71,13 @@ bool CheckIndicators(bool isBuy)
 //+------------------------------------------------------------------+
 void ExecuteTrade()
 {
-    bool isBuy = CheckBreakoutPullback(true);
-    bool isSell = CheckBreakoutPullback(false);
+    bool isBuy = CheckBreakoutAndConsolidation(true);
+    bool isSell = CheckBreakoutAndConsolidation(false);
     if (!isBuy && !isSell) return;
     if (!CheckIndicators(isBuy)) return;
-    if (useMultiTimeframe && CheckBreakoutPullback(isBuy) != CheckBreakoutPullback(isBuy, higherTimeframe)) return;
+    if (useMultiTimeframe && CheckBreakoutAndConsolidation(isBuy) != CheckBreakoutAndConsolidation(isBuy, higherTimeframe)) return;
     if (Hour() < timeFilterStart || Hour() > timeFilterEnd) return;
+    if (useNewsFilter && NewsEventDetected()) return;
 
     double lotSize = CalculateLotSize();
     double atrStopLoss = iATR(Symbol(), PERIOD_M15, 14, 0) * atrMultiplier;
@@ -94,22 +86,39 @@ void ExecuteTrade()
     double takeProfit = isBuy ? price + (atrStopLoss * 2) : price - (atrStopLoss * 2);
 
     int orderType = isBuy ? OP_BUY : OP_SELL;
-    OrderSend(Symbol(), orderType, lotSize, price, 10, stopLoss, takeProfit, "EA XAUUSD M15", 0, 0, clrNONE);
+    int ticket = OrderSend(Symbol(), orderType, lotSize, price, 10, stopLoss, takeProfit, "EA XAUUSD M15", 0, 0, clrNONE);
+    
+    if (ticket > 0 && useTrailingStop)
+    {
+        OrderModify(ticket, price, stopLoss, takeProfit, 0, clrNONE);
+    }
 }
 
 //+------------------------------------------------------------------+
-//| Expert initialization function                                  |
+//| Fungsi untuk trailing stop                                      |
 //+------------------------------------------------------------------+
-int OnInit()
+void ApplyTrailingStop()
 {
-    return INIT_SUCCEEDED;
+    for (int i = OrdersTotal() - 1; i >= 0; i--)
+    {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+        {
+            double newStop = OrderType() == OP_BUY ? Bid - trailingStopPips * Point : Ask + trailingStopPips * Point;
+            if ((OrderType() == OP_BUY && newStop > OrderStopLoss()) ||
+                (OrderType() == OP_SELL && newStop < OrderStopLoss()))
+            {
+                OrderModify(OrderTicket(), OrderOpenPrice(), newStop, OrderTakeProfit(), 0, clrNONE);
+            }
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
-//| Expert deinitialization function                                |
+//| Fungsi untuk mengecek berita ekonomi                            |
 //+------------------------------------------------------------------+
-void OnDeinit(const int reason)
+bool NewsEventDetected()
 {
+    return false; // Placeholder, perlu integrasi dengan API berita ekonomi
 }
 
 //+------------------------------------------------------------------+
@@ -118,4 +127,5 @@ void OnDeinit(const int reason)
 void OnTick()
 {
     ExecuteTrade();
+    if (useTrailingStop) ApplyTrailingStop();
 }
