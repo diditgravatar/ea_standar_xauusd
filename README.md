@@ -1,0 +1,1 @@
+# ea_standar_xauusd
