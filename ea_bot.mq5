@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Expert Advisor untuk XAUUSD M15 - MA53 & MA82 dengan Konsolidasi |
+//| Expert Advisor untuk XAUUSD M15 - MA53 & MA82 dengan Konsolidasi & Fitur TP Dinamis |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -21,10 +21,7 @@ input int timeFilterEnd = 21;
 input bool useMultiTimeframe = true;
 input ENUM_TIMEFRAMES higherTimeframe = PERIOD_H1;
 input bool useTrailingStop = true;
-input double trailingStopPips = 50;
 input bool useNewsFilter = true;
-input bool usePartialClose = true;
-input double partialClosePercentage = 50.0;
 
 //+------------------------------------------------------------------+
 //| Fungsi untuk mendapatkan lot berdasarkan equity                 |
@@ -67,34 +64,6 @@ bool CheckBreakoutAndConsolidation(bool isBuy)
 }
 
 //+------------------------------------------------------------------+
-//| Fungsi untuk eksekusi trading                                   |
-//+------------------------------------------------------------------+
-void ExecuteTrade()
-{
-    bool isBuy = CheckBreakoutAndConsolidation(true);
-    bool isSell = CheckBreakoutAndConsolidation(false);
-    if (!isBuy && !isSell) return;
-    if (!CheckIndicators(isBuy)) return;
-    if (useMultiTimeframe && CheckBreakoutAndConsolidation(isBuy) != CheckBreakoutAndConsolidation(isBuy, higherTimeframe)) return;
-    if (Hour() < timeFilterStart || Hour() > timeFilterEnd) return;
-    if (useNewsFilter && NewsEventDetected()) return;
-
-    double lotSize = CalculateLotSize();
-    double atrStopLoss = iATR(Symbol(), PERIOD_M15, 14, 0) * atrMultiplier;
-    double price = isBuy ? Ask : Bid;
-    double stopLoss = isBuy ? price - atrStopLoss : price + atrStopLoss;
-    double takeProfit = isBuy ? price + (atrStopLoss * 2) : price - (atrStopLoss * 2);
-
-    int orderType = isBuy ? OP_BUY : OP_SELL;
-    int ticket = OrderSend(Symbol(), orderType, lotSize, price, 10, stopLoss, takeProfit, "EA XAUUSD M15", 0, 0, clrNONE);
-    
-    if (ticket > 0 && useTrailingStop)
-    {
-        OrderModify(ticket, price, stopLoss, takeProfit, 0, clrNONE);
-    }
-}
-
-//+------------------------------------------------------------------+
 //| Fungsi untuk trailing stop                                      |
 //+------------------------------------------------------------------+
 void ApplyTrailingStop()
@@ -103,22 +72,50 @@ void ApplyTrailingStop()
     {
         if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
         {
-            double newStop = OrderType() == OP_BUY ? Bid - trailingStopPips * Point : Ask + trailingStopPips * Point;
-            if ((OrderType() == OP_BUY && newStop > OrderStopLoss()) ||
-                (OrderType() == OP_SELL && newStop < OrderStopLoss()))
+            double atr = iATR(Symbol(), PERIOD_M15, 14, 0) * atrMultiplier;
+            if (OrderType() == OP_BUY)
             {
-                OrderModify(OrderTicket(), OrderOpenPrice(), newStop, OrderTakeProfit(), 0, clrNONE);
+                double newSL = Bid - atr;
+                if (newSL > OrderStopLoss())
+                    OrderModify(OrderTicket(), OrderOpenPrice(), newSL, OrderTakeProfit(), 0, clrNONE);
+            }
+            else if (OrderType() == OP_SELL)
+            {
+                double newSL = Ask + atr;
+                if (newSL < OrderStopLoss())
+                    OrderModify(OrderTicket(), OrderOpenPrice(), newSL, OrderTakeProfit(), 0, clrNONE);
             }
         }
     }
 }
 
 //+------------------------------------------------------------------+
-//| Fungsi untuk mengecek berita ekonomi                            |
+//| Fungsi untuk eksekusi trading                                   |
 //+------------------------------------------------------------------+
-bool NewsEventDetected()
+void ExecuteTrade()
 {
-    return false; // Placeholder, perlu integrasi dengan API berita ekonomi
+    bool isBuy = CheckBreakoutAndConsolidation(true);
+    bool isSell = CheckBreakoutAndConsolidation(false);
+    if (!isBuy && !isSell) return;
+    if (useMultiTimeframe && CheckBreakoutAndConsolidation(isBuy) != CheckBreakoutAndConsolidation(isBuy, higherTimeframe)) return;
+    if (Hour() < timeFilterStart || Hour() > timeFilterEnd) return;
+    
+    double lotSize = CalculateLotSize();
+    double atrStopLoss = iATR(Symbol(), PERIOD_M15, 14, 0) * atrMultiplier;
+    double price = isBuy ? Ask : Bid;
+    double stopLoss = isBuy ? price - atrStopLoss : price + atrStopLoss;
+    double takeProfit = isBuy ? price + (atrStopLoss * 2) : price - (atrStopLoss * 2);
+    
+    int orderType = isBuy ? OP_BUY : OP_SELL;
+    OrderSend(Symbol(), orderType, lotSize, price, 10, stopLoss, takeProfit, "EA XAUUSD M15", 0, 0, clrNONE);
+}
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                  |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    return INIT_SUCCEEDED;
 }
 
 //+------------------------------------------------------------------+
